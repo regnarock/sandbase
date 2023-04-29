@@ -1,0 +1,9 @@
+[package]
+name = "my-game"
+version = "0.1.0"
+edition = "2018"
+resolver = "2"
+
+[dependencies]
+bevy = "0.10.1"
+winit = "0.28.3"
