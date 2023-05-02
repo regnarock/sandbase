@@ -1,5 +1,3 @@
-mod voxels;
-
 use bevy::{
     input::mouse::MouseButton,
     prelude::*,
