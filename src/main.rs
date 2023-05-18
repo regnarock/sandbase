@@ -1,4 +1,7 @@
 mod voxels;
+mod snapped_position;
+mod screen_position;
+mod world_position;
 
 use bevy::{
     input::mouse::{MouseButton},
@@ -6,16 +9,20 @@ use bevy::{
     window::*,
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
 };
+use crate::world_position::WorldPosition;
+use crate::screen_position::ScreenPosition;
+use crate::voxels::*;
+use crate::snapped_position::SnappedPosition;
 
 #[derive(Resource, Copy, Clone, Debug)]
-struct WorldConfig {
-    voxels_width: usize,
-    voxels_height: usize,
-    pixels_width: usize,
-    pixels_height: usize,
-    voxels: usize,
-    pixel_size: usize,
-    voxel_size: f32,
+pub struct WorldConfig {
+    pub voxels_width: usize,
+    pub voxels_height: usize,
+    pub pixels_width: usize,
+    pub pixels_height: usize,
+    pub voxels: usize,
+    pub pixel_size: usize,
+    pub voxel_size: f32,
 }
 
 impl WorldConfig {
@@ -38,129 +45,33 @@ const SAND: Color = Color::rgb(0.761, 0.698, 0.);
 const WATER: Color = Color::rgb(0., 0.749, 1.);
 const EARTH: Color = Color::rgb(0.545, 0.271, 0.075);
 
-#[derive(Component)]
-#[derive(Copy, Clone, Debug, PartialEq)]
-enum Voxel {
-    OOB,
-    of { data: VoxelStruct },
-}
-
-#[derive(Component)]
-#[derive(Copy, Clone, Debug, PartialEq)]
-struct VoxelStruct {
-    size: usize,
-    speed: f32,
-    element: Element,
-    kind: Kind,
-}
-
-#[derive(Component)]
-#[derive(Default, Copy, Clone, Debug, PartialEq)]
-struct WorldPos {
-    x: usize,
-    y: usize,
-}
-
-impl Voxel {
-    fn update(
-        &self,
-        world_config: &WorldConfig,
-        world: &mut GameWorld,
-        current_index: usize
-    ) -> Option<Move> {
-        match self {
-            Voxel::of { data: VoxelStruct { element: e, .. }, .. } => match e {
-                Element::Water => update_water(world_config, world, current_index),
-                Element::Sand => update_sand(world_config, world, current_index),
-                Element::Earth => update_earth(world_config, world, current_index),
-            },
-// no-op for Out Of Bounds voxels
-            Voxel::OOB => None
-        }
-    }
-}
-
-#[derive(Default, Resource)]
-struct VoxelManager {
-    sand_material: Handle<ColorMaterial>,
-    water_material: Handle<ColorMaterial>,
-    earth_material: Handle<ColorMaterial>,
-}
-
-impl VoxelManager {
-    fn spawn_voxel(&self, world_config: &WorldConfig, element: Element) -> VoxelStruct {
-        match element {
-            Element::Sand => VoxelStruct {
-                size: world_config.pixel_size,
-                speed: world_config.voxel_size,
-                element,
-                kind: Kind::Solid,
-            },
-            Element::Water => VoxelStruct {
-                size: world_config.pixel_size,
-                speed: world_config.voxel_size,
-                element,
-                kind: Kind::Liquid,
-            },
-            Element::Earth => VoxelStruct {
-                size: world_config.pixel_size,
-                speed: world_config.voxel_size,
-                element,
-                kind: Kind::Solid,
-            },
-        }
-    }
-
-    fn get_material(&self, element: Element) -> Handle<ColorMaterial> {
-        match element {
-            Element::Sand => self.sand_material.clone(),
-            Element::Water => self.water_material.clone(),
-            Element::Earth => self.earth_material.clone(),
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-enum Kind {
-    Solid,
-    Liquid,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-enum Element {
-    Sand,
-    Water,
-    Earth,
-}
-
-enum Move {
-    Displace(usize),
-    Swap(usize),
-}
 
 #[derive(Resource)]
-struct GameWorld {
-    voxels: Vec<Option<Voxel>>,
+pub struct GameWorld {
+    voxels: Vec<Vec<Option<Voxel>>>,
     mode: Element,
 }
 
 impl GameWorld {
-    fn new(voxels: usize) -> Self {
+    pub fn new(width: usize, height: usize) -> Self {
         GameWorld {
-            voxels: vec![None; voxels],
+            voxels: vec![vec![None; height]; width],
             mode: Element::Sand,
         }
     }
-}
 
-// impl Default for GameWorld {
-//     fn default() -> Self {
-//         Self {
-//             voxels: [None; VOXELS],
-//             mode: Element::Sand,
-//         }
-//     }
-// }
+    pub fn get_cell(&self, wpos: WorldPosition) -> Option<Voxel> {
+        self.voxels[wpos.x][wpos.y]
+    }
+
+    pub fn set_cell(&mut self, wpos: WorldPosition, voxel: &Voxel) {
+        self.voxels[wpos.x][wpos.y] = Some(*voxel)
+    }
+
+    pub fn delete_cell(&mut self, wpos: WorldPosition) {
+        self.voxels[wpos.x][wpos.y] = None
+    }
+}
 
 #[derive(Default, Resource)]
 struct VoxelMesh(Mesh2dHandle);
@@ -187,110 +98,15 @@ struct WindowSize {
 }
 
 #[derive(Default, Resource, Copy, Clone, Debug)]
-struct ScaleFactor {
-    height: f32,
-    width: f32,
-}
-
-#[derive(Default, Resource, Copy, Clone, Debug)]
-struct WorldPosition {
-    x: usize,
-    y: usize,
-}
-
-impl WorldPosition {
-
-    fn from_index(
-        index: usize,
-        voxels_width: usize,
-    ) -> WorldPosition {
-        WorldPosition {
-            x: index % voxels_width,
-            y: index / voxels_width,
-        }
-    }
-
-    fn as_index(
-        &self,
-        voxels_width: usize,
-    ) -> usize {
-        self.y * voxels_width + self.x
-    }
-
-    fn as_snapped(
-        &self,
-        voxel_size: f32,
-    ) -> SnappedPosition {
-        SnappedPosition {
-            x: self.x as f32 * voxel_size,
-            y: self.y as f32 * voxel_size,
-        }
-    }
-}
-
-#[derive(Default, Resource, Copy, Clone, Debug)]
-struct ScreenPosition {
-    x: f32,
-    y: f32,
-}
-
-impl ScreenPosition {
-    fn from_vec2(v: Vec2) -> Self {
-        ScreenPosition {
-            x: v.x,
-            y: v.y,
-        }
-    }
-}
-
-#[derive(Default, Resource, Copy, Clone, Debug)]
-struct SnappedPosition {
-    x: f32,
-    y: f32,
-}
-
-impl SnappedPosition {
-    fn as_vec2(&self) -> Vec2 {
-        Vec2::new(self.x, self.y)
-    }
-
-    fn as_screen_position(&self) -> ScreenPosition {
-        ScreenPosition {
-            x: self.x,
-            y: self.y,
-        }
-    }
-}
-
-fn as_world_position(vector: Vec2) -> WorldPosition {
-    WorldPosition {
-        x: vector.x as usize,
-        y: vector.y as usize,
-    }
-}
-
-#[derive(Default, Resource, Copy, Clone, Debug)]
 struct ScreenSize {
     width: i32,
     height: i32,
 }
 
-fn get_world_position_from_screen_position(
-    screen_position: ScreenPosition,
-    voxels_size: f32,
-) -> WorldPosition {
-// TODO: add camera shift
-
-    let x = screen_position.x;
-    let y = screen_position.y;
-    WorldPosition {
-        x: (x / voxels_size) as usize,
-        y: (y / voxels_size) as usize,
-    }
-}
-
 fn main() {
-    let world_config = WorldConfig::new(128, 72, 10);
+    let voxels_width = 128;
+    let voxels_height = 72;
+    let world_config = WorldConfig::new(voxels_width, voxels_height, 10);
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -300,13 +116,12 @@ fn main() {
             ..default()
         }))
         .insert_resource(world_config)
-        .insert_resource(GameWorld::new(world_config.voxels))
+        .insert_resource(GameWorld::new(voxels_width, voxels_height))
         .init_resource::<VoxelManager>()
         .init_resource::<VoxelMesh>()
         .init_resource::<MouseLocScreen>()
         .init_resource::<MouseLocWorld>()
         .init_resource::<WindowSize>()
-        .init_resource::<ScaleFactor>()
         .init_resource::<ScreenSize>()
         .add_system(handle_window_resize)
         .add_startup_system(setup)
@@ -323,7 +138,6 @@ fn handle_window_resize(
     mut resize_reader: EventReader<WindowResized>,
     mut created_reader: EventReader<WindowCreated>,
     mut window_size: ResMut<WindowSize>,
-    mut scale_factor: ResMut<ScaleFactor>,
     mut cameras: Query<(&mut Transform, &Camera)>,
     world_config: Res<WorldConfig>,
 ) {
@@ -332,9 +146,6 @@ fn handle_window_resize(
         println!("Initial number of voxels seen height {} width {}", e.height / world_config.voxel_size, e.width / world_config.voxel_size);
         window_size.width = e.width;
         window_size.height = e.height;
-        scale_factor.width = window_size.width / e.width;
-        scale_factor.height = window_size.height / e.height;
-        println!("Initial scale factor h{} w{}", scale_factor.height, scale_factor.width);
         match cameras.get_single_mut() {
             Ok((mut transform, _camera)) => {
                 *transform = Transform::from_translation(Vec3::new(
@@ -389,16 +200,15 @@ fn setup_voxel_scene(
     for x in 1..=2 {
         for y in 60..=61 {
             let world_position = WorldPosition { x, y };
-            let index = world_position.as_index(world_config.voxels_width);
-            let snapped_position = world_position.as_snapped(world_config.voxel_size);
-            println!("Pop block {} {} at world pos {} {}", x, y, snapped_position.x, snapped_position.y);
+            let snapped_position = world_position.to_snapped(world_config.voxel_size);
+            println!("Pop block {} {} at world pos {} {}", x, y, world_position.x, world_position.y);
             let voxel_data = voxel_manager.spawn_voxel(&*world_config, Element::Sand);
             let voxel = Voxel::of { data: voxel_data };
-            world.voxels[index] = Some(voxel);
+            world.set_cell(world_position, &voxel);
             commands.spawn((MaterialMesh2dBundle {
                 mesh: voxel_mesh.0.clone(),
                 material: voxel_manager.get_material(voxel_data.element),
-                transform: Transform::from_translation(snapped_position.as_vec2().extend(0.0)),
+                transform: Transform::from_translation(snapped_position.to_screen_position().to_vec3()),
                 ..Default::default()
             }, voxel));
         }
@@ -475,198 +285,172 @@ fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
 fn update_voxel_world(
     world_config: Res<WorldConfig>,
     mut world: ResMut<GameWorld>,
-    scale_factor: Res<ScaleFactor>,
     mut query: Query<(&mut Transform, &mut Voxel)>,
 ) {
-    let _factor = scale_factor.into_inner();
     for (mut transform, voxel) in query.iter_mut() {
         let screen_position = ScreenPosition::from_vec2(transform.translation.truncate());
-        let world_position = get_world_position_from_screen_position(screen_position, world_config.voxel_size);
-        let index = world_position.as_index(world_config.voxels_width);
+        let snapped_position = screen_position.to_snapped(&world_config);
+        let world_position = snapped_position.to_world_position(world_config.voxel_size);
 
-// voxels stop being updated before falling from the screen
-        let old_voxel = world.voxels[index];
-        match voxel.update(&*world_config, &mut world, index) {
-            Some(Move::Displace(new_index)) => {
-                world.voxels[index] = None;
-                world.voxels[new_index] = old_voxel;
-                let new_pos = WorldPosition::from_index(new_index, world_config.voxels_width).as_snapped(world_config.voxel_size).as_screen_position();
-                transform.translation = Vec3::new(new_pos.x, new_pos.y, 0.0);
+        match voxel.update(&*world_config, &mut world, world_position) {
+            Some(Move::Displace(new_world_position)) => {
+                world.delete_cell(world_position);
+                world.set_cell(new_world_position, &*voxel);
+                transform.translation = new_world_position.to_snapped(world_config.voxel_size)
+                    .to_screen_position()
+                    .to_vec3();
             }
-/*            Some(Move::Swap(new_index)) => {
-                let tmp_voxel = world.voxels[new_index];
-                world.voxels[new_index] = old_voxel;
-                world.voxels[index] = tmp_voxel;
-                let old_pos = WorldPosition::from_index(new_index, world_config.voxels_width).as_snapped(world_config.voxel_size).as_screen_position();
-                let new_pos = WorldPosition::from_index(new_index, world_config.voxels_width).as_snapped(world_config.voxel_size).as_screen_position();
-                transform.translation = Vec3::new(new_pos.x, new_pos.y, 0.0);
-                let Ok((mut transform_old, mut _voxel)) = query.get_mut(tmp_voxel.unwrap().get_id().unwrap());
-                transform_old.translation = Vec3::new(old_pos.x, old_pos.y, 0.0);
-            }*/
+            /*            Some(Move::Swap(new_index)) => {
+                            let tmp_voxel = world.voxels[new_index];
+                            world.voxels[new_index] = old_voxel;
+                            world.voxels[index] = tmp_voxel;
+                            let old_pos = WorldPosition::from_index(new_index, world_config.voxels_width).as_snapped(world_config.voxel_size).as_screen_position();
+                            let new_pos = WorldPosition::from_index(new_index, world_config.voxels_width).as_snapped(world_config.voxel_size).as_screen_position();
+                            transform.translation = Vec3::new(new_pos.x, new_pos.y, 0.0);
+                            let Ok((mut transform_old, mut _voxel)) = query.get_mut(tmp_voxel.unwrap().get_id().unwrap());
+                            transform_old.translation = Vec3::new(old_pos.x, old_pos.y, 0.0);
+                        }*/
 // No-op, voxel is currently stuck
             _ => ()
         }
     }
 }
 
-
-fn update_water(
+fn get_left_voxel(
+    world: &GameWorld,
+    world_position: WorldPosition,
     world_config: &WorldConfig,
-    world: &mut GameWorld,
-    current_index: usize
-) -> Option<Move> {
-    vec![
-        get_bottom_voxel(&world, current_index, world_config),
-        get_bottom_left_voxel(&world, current_index, world_config),
-        get_bottom_right_voxel(&world, current_index, world_config),
-        get_left_voxel(&world, current_index),
-        get_right_voxel(&world, current_index, &*world_config)
-    ].iter()
-        .map(|(maybe_voxel, new_index)| liquid_behaviour(maybe_voxel, *new_index))
-        .find_map(|opt| opt)
-}
-
-fn update_sand(
-    world_config: &WorldConfig,
-    world: &mut GameWorld,
-    current_index: usize
-) -> Option<Move> {
-    vec![
-        get_bottom_voxel(&world, current_index, world_config),
-        get_bottom_left_voxel(&world, current_index, world_config),
-        get_bottom_right_voxel(&world, current_index, world_config),
-    ].iter()
-        .map(|(maybe_voxel, new_index)| falling_solid_behaviour(maybe_voxel, *new_index))
-        .find_map(|opt| opt)
-}
-
-fn update_earth(
-    world_config: &WorldConfig,
-    world: &mut GameWorld,
-    current_index: usize
-) -> Option<Move> {
-    vec![
-        get_bottom_voxel(&world, current_index, world_config),
-        get_bottom2_left_voxel(&world, current_index, world_config),
-        get_bottom2_right_voxel(&world, current_index, world_config),
-    ].iter()
-        .map(|(maybe_voxel, new_index)| falling_solid_behaviour(maybe_voxel, *new_index))
-        .find_map(|opt| opt)
-}
-
-fn falling_solid_behaviour(other_voxel: &Option<Voxel>, new_index: usize) -> Option<Move> {
-    match other_voxel {
-        None => Some(Move::Displace(new_index)),
-        Some(voxel) => match voxel {
-            Voxel::of { data: VoxelStruct { kind: Kind::Liquid, .. }, .. } => {
-                Some(Move::Swap(new_index))
-            }
-            _ => None,
-        }
-    }
-}
-
-fn liquid_behaviour(other_voxel: &Option<Voxel>, new_index: usize) -> Option<Move> {
-    match other_voxel {
-        None => Some(Move::Displace(new_index)),
-        Some(voxel) => match voxel {
-            _ => None,
-        }
-    }
-}
-
-fn get_left_voxel(world: &GameWorld, index: usize) -> (Option<Voxel>, usize) {
-    let left_index = index as i32 - 1;
-    let maybe_voxel = if left_index >= 0 {
-        world.voxels[left_index as usize]
+) -> (Option<Voxel>, WorldPosition) {
+    let wrapped_x = if world_position.x >= 1 {
+        world_position.x - 1
     } else {
-        Some(Voxel::OOB)
+        world_config.voxels_width - 1
     };
-    (maybe_voxel, left_index as usize)
+    let left_pos = WorldPosition {
+        x: wrapped_x,
+        y: world_position.y,
+    };
+    let maybe_voxel = world.get_cell(left_pos);
+    (maybe_voxel, left_pos)
 }
 
 fn get_bottom_voxel(
     world: &GameWorld,
-    index: usize,
-    world_config: &WorldConfig,
-) -> (Option<Voxel>, usize) {
-    let bottom_index = index as i32 - world_config.voxels_width as i32;
-    let maybe_voxel = if bottom_index >= 0 {
-        world.voxels[bottom_index as usize]
-    } else {
-        Some(Voxel::OOB)
+    world_position: WorldPosition,
+    _world_config: &WorldConfig,
+) -> (Option<Voxel>, WorldPosition) {
+    if world_position.y < 1 {
+        return (Some(Voxel::OOB), world_position)
+    }
+    let bottom_pos = WorldPosition {
+        x: world_position.x,
+        y: world_position.y - 1,
     };
-    (maybe_voxel, bottom_index as usize)
+    (world.get_cell(bottom_pos), bottom_pos)
 }
 
 fn get_right_voxel(
     world: &GameWorld,
-    index: usize,
+    world_position: WorldPosition,
     world_config: &WorldConfig,
-) -> (Option<Voxel>, usize) {
-    let right_index = index + 1;
-    let maybe_voxel = if right_index < world_config.voxels {
-        world.voxels[right_index as usize]
+) -> (Option<Voxel>, WorldPosition) {
+    let wrapped_x = if world_position.x < world_config.voxels_width - 1 {
+        world_position.x + 1
     } else {
-        Some(Voxel::OOB)
+        0
     };
-    (maybe_voxel, right_index as usize)
+    let right_pos = WorldPosition {
+        x: wrapped_x,
+        y: world_position.y,
+    };
+    let maybe_voxel = world.get_cell(right_pos);
+    (maybe_voxel, right_pos)
 }
 
 fn get_bottom_left_voxel(
     world: &GameWorld,
-    index: usize,
+    world_position: WorldPosition,
     world_config: &WorldConfig,
-) -> (Option<Voxel>, usize) {
-    let left_index = index as i32 - 1 - world_config.voxels_width as i32;
-    let maybe_voxel = if left_index >= 0 {
-        world.voxels[left_index as usize]
+) -> (Option<Voxel>, WorldPosition) {
+    if world_position.y < 1 {
+        return (Some(Voxel::OOB), world_position)
+    }
+
+    let wrapped_x = if world_position.x >= 1 {
+        world_position.x - 1
     } else {
-        Some(Voxel::OOB)
+        world_config.voxels_width - 1
     };
-    (maybe_voxel, left_index as usize)
+    let left_bottom_pos = WorldPosition {
+        x: wrapped_x,
+        y: world_position.y - 1,
+    };
+    let maybe_voxel = world.get_cell(left_bottom_pos);
+    (maybe_voxel, left_bottom_pos)
 }
 
 fn get_bottom_right_voxel(
     world: &GameWorld,
-    index: usize,
+    world_position: WorldPosition,
     world_config: &WorldConfig,
-) -> (Option<Voxel>, usize) {
-    let right_index = index as i32 + 1 - world_config.voxels_width as i32;
-    let maybe_voxel = if right_index >= 0 {
-        world.voxels[right_index as usize]
+) -> (Option<Voxel>, WorldPosition) {
+    if world_position.y < 1 {
+        return (Some(Voxel::OOB), world_position)
+    }
+    let wrapped_x = if world_position.x < world_config.voxels_width - 1 {
+        world_position.x + 1
     } else {
-        Some(Voxel::OOB)
+        0
     };
-    (maybe_voxel, right_index as usize)
+    let right_bottom_pos = WorldPosition {
+        x: wrapped_x,
+        y: world_position.y - 1,
+    };
+    let maybe_voxel = world.get_cell(right_bottom_pos);
+    (maybe_voxel, right_bottom_pos)
 }
 
 fn get_bottom2_left_voxel(
     world: &GameWorld,
-    index: usize,
+    world_position: WorldPosition,
     world_config: &WorldConfig,
-) -> (Option<Voxel>, usize) {
-    let left_index = index as i32 - 1 - world_config.voxels_width as i32 * 2;
-    let maybe_voxel = if left_index >= 0 {
-        world.voxels[left_index as usize]
+) -> (Option<Voxel>, WorldPosition) {
+    if world_position.y < 2 {
+        return (Some(Voxel::OOB), world_position)
+    }
+    let wrapped_x = if world_position.x >= 1 {
+        world_position.x - 1
     } else {
-        Some(Voxel::OOB)
+        world_config.voxels_width - 1
     };
-    (maybe_voxel, left_index as usize)
+    let left_bottom_pos = WorldPosition {
+        x: wrapped_x,
+        y: world_position.y - 2,
+    };
+    let maybe_voxel = world.get_cell(left_bottom_pos);
+    (maybe_voxel, left_bottom_pos)
 }
 
 fn get_bottom2_right_voxel(
     world: &GameWorld,
-    index: usize,
+    world_position: WorldPosition,
     world_config: &WorldConfig,
-) -> (Option<Voxel>, usize) {
-    let right_index = index as i32 + 1 - world_config.voxels_width as i32 * 2;
-    let maybe_voxel = if right_index >= 0 {
-        world.voxels[right_index as usize]
+) -> (Option<Voxel>, WorldPosition) {
+    if world_position.y < 2 {
+        return (Some(Voxel::OOB), world_position)
+    }
+
+    let wrapped_x = if world_position.x < world_config.voxels_width - 1 {
+        world_position.x + 1
     } else {
-        Some(Voxel::OOB)
+        0
     };
-    (maybe_voxel, right_index as usize)
+    let right_bottom_pos = WorldPosition {
+        x: wrapped_x,
+        y: world_position.y - 2,
+    };
+    let maybe_voxel = world.get_cell(right_bottom_pos);
+    (maybe_voxel, right_bottom_pos)
 }
 
 fn handle_input(
@@ -680,25 +464,20 @@ fn handle_input(
     mut buttons: Query<(&mut BackgroundColor, &Button, &Children)>,
     mut texts: Query<&mut Text>,
     mut cameras: Query<(&mut Transform, &Camera)>,
-    scale_factor: Res<ScaleFactor>,
     world_config: Res<WorldConfig>,
 ) {
     if mouse_button_input.just_pressed(MouseButton::Left) || mouse_button_input.pressed(MouseButton::Left) {
-        let _factor = scale_factor.into_inner();
+        let snapped_pos: SnappedPosition = mouse_loc.0.to_snapped(&world_config);
+        let world_position = snapped_pos.to_world_position(world_config.voxel_size);
 
-        let world_position = get_world_position_from_screen_position(mouse_loc.0, world_config.voxel_size);
-
-        let index = world_position.as_index(world_config.voxels_width);
-        let snapped_pos = world_position.as_snapped(world_config.voxel_size);
-
-        if world.voxels[index].is_none() {
+        if world.get_cell(world_position).is_none() {
             let voxel_data = voxel_manager.spawn_voxel(&*world_config, world.mode);
             let voxel = Voxel::of { data: voxel_data };
-            world.voxels[index] = Some(voxel);
+            world.set_cell(world_position, &voxel);
             commands.spawn((MaterialMesh2dBundle {
                 mesh: voxel_mesh.0.clone(),
                 material: voxel_manager.get_material(world.mode),
-                transform: Transform::from_translation(snapped_pos.as_vec2().extend(0.0)),
+                transform: Transform::from_translation(snapped_pos.to_screen_position().to_vec3()),
                 ..Default::default()
             }, voxel));
         }
@@ -779,20 +558,19 @@ mod tests {
 
     #[test]
     fn world_position_should_be_x_64_and_y_36_and_index_should_be_9280() {
-        let world_config = WorldConfig::new(10, 144, 10);
+        let world_config = WorldConfig::new(256, 144, 10);
 
         let screen_position = ScreenPosition {
             x: 640.0,
             y: 360.0,
         };
 
-        let world_position = get_world_position_from_screen_position(screen_position, world_config.voxel_size);
+        let world_position = screen_position.to_snapped(world_config.voxel_size).to_world_position(world_config.voxel_size);
         let index = world_position.as_index(world_config.voxels_width);
-        let snapped_position = world_position.as_snapped(world_config.voxel_size);
+        let snapped_position = world_position.to_snapped(world_config.voxel_size);
 
         assert_eq!(world_position.x, 64); // 640/10
         assert_eq!(world_position.y, 36); // 360/10
-        assert_eq!(index, 9280); // 256*36+64
         assert_eq!(snapped_position.x, 640.0);
         assert_eq!(snapped_position.y, 360.0);
     }
@@ -810,16 +588,14 @@ mod tests {
             y: 429.0,
         };
 
-        let world_position = get_world_position_from_screen_position(screen_position, world_config.voxel_size);
-        let index = world_position.as_index(world_config.voxels_width);
+        let world_position = screen_position.to_snapped(world_config.voxel_size).to_world_position(world_config.voxel_size);
         let new_world_position = WorldPosition::from_index(index, world_config.voxels_width);
-        let snapped_position = world_position.as_snapped(world_config.voxel_size);
+        let snapped_position = world_position.to_snapped(world_config.voxel_size);
 
         assert_eq!(world_position.x, 11); // 117/10
         assert_eq!(world_position.y, 42); // 429/10
         assert_eq!(new_world_position.x, 11); // 117/10
         assert_eq!(new_world_position.y, 42); // 429/10
-        assert_eq!(index, 10763); // 256*42+11
         assert_eq!(snapped_position.x, 110.0);
         assert_eq!(snapped_position.y, 420.0);
     }
@@ -835,7 +611,7 @@ mod tests {
             y: 429.0,
         };
         let world_config = WorldConfig::new(10, 144, 10);
-        let world_position = get_world_position_from_screen_position(screen_position, world_config.voxel_size);
+        let world_position = screen_position.to_snapped(world_config.voxel_size).to_world_position(world_config.voxel_size);
     }
 
     #[test]
