@@ -1,8 +1,8 @@
 use bevy::{
     prelude::*,
 };
-use super::screen_position::*;
-use super::world_position::*;
+use crate::positions::screen_position::*;
+use crate::positions::world_position::*;
 use crate::WorldConfig;
 
 #[derive(Default, Resource, Copy, Clone, Debug)]
@@ -34,11 +34,11 @@ impl SnappedPosition {
     }
 
     pub fn from_screen_position(screen_pos: &ScreenPosition, world_config: &WorldConfig) -> SnappedPosition {
-        let snapped_x = (screen_pos.x / world_config.voxel_size) * world_config.voxel_size;
-        let snapped_y = (screen_pos.y / world_config.voxel_size) * world_config.voxel_size;
+        let snapped_x = (screen_pos.x as usize / world_config.pixel_size) * world_config.pixel_size;
+        let snapped_y = (screen_pos.y  as usize / world_config.pixel_size) * world_config.pixel_size;
         SnappedPosition {
-            x: snapped_x.min(world_config.pixels_width as f32 - 1.0).max(0.0),
-            y: snapped_y.min(world_config.pixels_height as f32 - 1.0).max(0.0),
+            x: snapped_x.min(world_config.pixels_width - world_config.pixel_size).max(0) as f32,
+            y: snapped_y.min(world_config.pixels_height - world_config.pixel_size).max(0) as f32,
         }
     }
 }
@@ -57,7 +57,7 @@ mod tests {
             y: 360.0,
         };
 
-        let world_position = screen_position.to_snapped(world_config.voxel_size).to_world_position(world_config.voxel_size);
+        let world_position = screen_position.to_snapped(&world_config).to_world_position(world_config.voxel_size);
         let index = world_position.as_index(world_config.voxels_width);
         let snapped_position = world_position.to_snapped(world_config.voxel_size);
 

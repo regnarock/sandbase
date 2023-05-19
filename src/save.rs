@@ -148,12 +148,6 @@ struct WindowSize {
     height: f32,
 }
 
-#[derive(Default, Resource, Copy, Clone, Debug)]
-struct ScaleFactor {
-    height: f32,
-    width: f32,
-}
-
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -473,15 +467,6 @@ fn get_index_from_pos(
     y * GAME_WORLD_WIDTH + x
 }
 
-fn get_pos_from_index(
-    index: usize,
-    scale_factor: &ScaleFactor,
-) -> Vec2 {
-    let x = index % GAME_WORLD_WIDTH;
-    let y = index / GAME_WORLD_WIDTH;
-    Vec2::new((x * PIXEL_SIZE) as f32, (y * PIXEL_SIZE) as f32)
-}
-
 fn handle_input(
     mut commands: Commands,
     keys: Res<Input<KeyCode>>, // Add this line
@@ -492,11 +477,9 @@ fn handle_input(
     mouse_button_input: Res<Input<MouseButton>>,
     mut buttons: Query<(&mut BackgroundColor, &Button, &Children)>,
     mut texts: Query<&mut Text>,
-    scale_factor: Res<ScaleFactor>,
 ) {
     if mouse_button_input.just_pressed(MouseButton::Left) {
         let pos = mouse_loc.0;
-        let factor = scale_factor.into_inner();
         let index = get_index_from_pos(pos, factor);
         let snaped_pos = get_pos_from_index(index, factor);
         println!("Mouse in screen x[{}] y[{}]", pos.x, pos.y);

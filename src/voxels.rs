@@ -2,6 +2,7 @@ use bevy::{
     prelude::*,
 };
 use crate::*;
+use crate::positions::world_position::WorldPosition;
 
 #[derive(Component)]
 #[derive(Copy, Clone, Debug, PartialEq)]

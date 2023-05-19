@@ -1,18 +1,20 @@
-mod voxels;
-mod snapped_position;
-mod screen_position;
-mod world_position;
-
 use bevy::{
-    input::mouse::{MouseButton},
+    input::mouse::MouseButton,
     prelude::*,
-    window::*,
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
 };
-use crate::world_position::WorldPosition;
-use crate::screen_position::ScreenPosition;
-use crate::voxels::*;
-use crate::snapped_position::SnappedPosition;
+
+use handlers::{camera::handle_window_resize};
+use voxels::*;
+
+use crate::positions::screen_position::ScreenPosition;
+use crate::positions::world_position::WorldPosition;
+use std::collections::VecDeque;
+use crate::handlers::camera;
+
+mod voxels;
+mod handlers;
+mod positions;
 
 #[derive(Resource, Copy, Clone, Debug)]
 pub struct WorldConfig {
@@ -48,14 +50,18 @@ const EARTH: Color = Color::rgb(0.545, 0.271, 0.075);
 
 #[derive(Resource)]
 pub struct GameWorld {
-    voxels: Vec<Vec<Option<Voxel>>>,
+    voxels: VecDeque<Vec<Option<Voxel>>>,
     mode: Element,
 }
 
 impl GameWorld {
     pub fn new(width: usize, height: usize) -> Self {
+        let mut voxels: VecDeque<Vec<Option<Voxel>>> = VecDeque::new();
+        for _ in 0..width {
+            voxels.push_back(vec![None; height]);
+        }
         GameWorld {
-            voxels: vec![vec![None; height]; width],
+            voxels,
             mode: Element::Sand,
         }
     }
@@ -92,19 +98,19 @@ impl MouseLocWorld {
 }
 
 #[derive(Default, Resource)]
-struct WindowSize {
+pub struct WindowSize {
     width: f32,
     height: f32,
 }
 
 #[derive(Default, Resource, Copy, Clone, Debug)]
-struct ScreenSize {
+pub struct ScreenSize {
     width: i32,
     height: i32,
 }
 
 fn main() {
-    let voxels_width = 128;
+    let voxels_width = 128 + 30;
     let voxels_height = 72;
     let world_config = WorldConfig::new(voxels_width, voxels_height, 10);
     App::new()
@@ -129,52 +135,16 @@ fn main() {
         .add_startup_system(setup_voxel_scene)
         .add_system(mouse_movement_updating_system)
         .add_system(handle_input)
+        .add_system(camera::handle_inputs)
         .add_system(update_voxel_world)
         .run();
-}
-
-fn handle_window_resize(
-    mut commands: Commands,
-    mut resize_reader: EventReader<WindowResized>,
-    mut created_reader: EventReader<WindowCreated>,
-    mut window_size: ResMut<WindowSize>,
-    mut cameras: Query<(&mut Transform, &Camera)>,
-    world_config: Res<WorldConfig>,
-) {
-    for e in resize_reader.iter() {
-        println!("Screen resized to {:?} {:?}", e.width, e.height);
-        println!("Initial number of voxels seen height {} width {}", e.height / world_config.voxel_size, e.width / world_config.voxel_size);
-        window_size.width = e.width;
-        window_size.height = e.height;
-        match cameras.get_single_mut() {
-            Ok((mut transform, _camera)) => {
-                *transform = Transform::from_translation(Vec3::new(
-                    window_size.width / 2.0 - world_config.voxel_size / 2.0,
-                    window_size.height / 2.0 - world_config.voxel_size / 2.0,
-                    0.0,
-                ))
-            }
-            _ => ()
-        }
-    }
-    if !created_reader.is_empty() {
-        created_reader.clear();
-        commands.spawn(Camera2dBundle {
-            transform: Transform::from_translation(Vec3::new(
-                window_size.width / 2.0 - world_config.voxel_size / 2.0,
-                window_size.height / 2.0 - world_config.voxel_size / 2.0,
-                0.0,
-            )),
-            ..Default::default()
-        });
-    }
 }
 
 fn setup(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut voxel_manager: ResMut<VoxelManager>,
-    mut world_config: Res<WorldConfig>,
+    world_config: Res<WorldConfig>,
     mut voxel_mesh: ResMut<VoxelMesh>,
 ) {
     let sand_color_material = ColorMaterial::from(SAND);
@@ -340,7 +310,7 @@ fn get_bottom_voxel(
     _world_config: &WorldConfig,
 ) -> (Option<Voxel>, WorldPosition) {
     if world_position.y < 1 {
-        return (Some(Voxel::OOB), world_position)
+        return (Some(Voxel::OOB), world_position);
     }
     let bottom_pos = WorldPosition {
         x: world_position.x,
@@ -373,7 +343,7 @@ fn get_bottom_left_voxel(
     world_config: &WorldConfig,
 ) -> (Option<Voxel>, WorldPosition) {
     if world_position.y < 1 {
-        return (Some(Voxel::OOB), world_position)
+        return (Some(Voxel::OOB), world_position);
     }
 
     let wrapped_x = if world_position.x >= 1 {
@@ -395,7 +365,7 @@ fn get_bottom_right_voxel(
     world_config: &WorldConfig,
 ) -> (Option<Voxel>, WorldPosition) {
     if world_position.y < 1 {
-        return (Some(Voxel::OOB), world_position)
+        return (Some(Voxel::OOB), world_position);
     }
     let wrapped_x = if world_position.x < world_config.voxels_width - 1 {
         world_position.x + 1
@@ -416,7 +386,7 @@ fn get_bottom2_left_voxel(
     world_config: &WorldConfig,
 ) -> (Option<Voxel>, WorldPosition) {
     if world_position.y < 2 {
-        return (Some(Voxel::OOB), world_position)
+        return (Some(Voxel::OOB), world_position);
     }
     let wrapped_x = if world_position.x >= 1 {
         world_position.x - 1
@@ -437,7 +407,7 @@ fn get_bottom2_right_voxel(
     world_config: &WorldConfig,
 ) -> (Option<Voxel>, WorldPosition) {
     if world_position.y < 2 {
-        return (Some(Voxel::OOB), world_position)
+        return (Some(Voxel::OOB), world_position);
     }
 
     let wrapped_x = if world_position.x < world_config.voxels_width - 1 {
@@ -455,7 +425,7 @@ fn get_bottom2_right_voxel(
 
 fn handle_input(
     mut commands: Commands,
-    keys: Res<Input<KeyCode>>, // Add this line
+    keys: Res<Input<KeyCode>>,
     mouse_loc: Res<MouseLocWorld>,
     voxel_manager: Res<VoxelManager>,
     voxel_mesh: Res<VoxelMesh>,
@@ -463,11 +433,10 @@ fn handle_input(
     mouse_button_input: Res<Input<MouseButton>>,
     mut buttons: Query<(&mut BackgroundColor, &Button, &Children)>,
     mut texts: Query<&mut Text>,
-    mut cameras: Query<(&mut Transform, &Camera)>,
     world_config: Res<WorldConfig>,
 ) {
     if mouse_button_input.just_pressed(MouseButton::Left) || mouse_button_input.pressed(MouseButton::Left) {
-        let snapped_pos: SnappedPosition = mouse_loc.0.to_snapped(&world_config);
+        let snapped_pos = mouse_loc.0.to_snapped(&world_config);
         let world_position = snapped_pos.to_world_position(world_config.voxel_size);
 
         if world.get_cell(world_position).is_none() {
@@ -498,31 +467,6 @@ fn handle_input(
             *bg_color = BackgroundColor::from(EARTH);
             text.sections[0].value = "EARTH".to_string();
             world.mode = Element::Earth;
-        }
-    }
-    if keys.pressed(KeyCode::Left) {
-// TODO wrap world in camera display
-        match cameras.get_single_mut() {
-            Ok((mut transform, _camera)) => {
-                *transform = Transform::from_translation(Vec3::new(
-                    transform.translation.x - 5.0,
-                    transform.translation.y,
-                    0.0,
-                ))
-            }
-            _ => ()
-        }
-    } else if keys.pressed(KeyCode::Right) {
-// TODO wrap world in camera display
-        match cameras.get_single_mut() {
-            Ok((mut transform, _camera)) => {
-                *transform = Transform::from_translation(Vec3::new(
-                    transform.translation.x + 5.0,
-                    transform.translation.y,
-                    0.0,
-                ))
-            }
-            _ => ()
         }
     }
 }

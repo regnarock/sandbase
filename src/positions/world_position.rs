@@ -1,7 +1,7 @@
 use bevy::{
     prelude::*,
 };
-use crate::snapped_position::SnappedPosition;
+use crate::positions::snapped_position::SnappedPosition;
 
 #[derive(Default, Resource, Copy, Clone, Debug)]
 pub struct WorldPosition {
