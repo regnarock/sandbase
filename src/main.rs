@@ -1,16 +1,14 @@
-use bevy::input::InputPlugin;
 use bevy::prelude::*;
-use bevy::utils::tracing::instrument::WithSubscriber;
 
 use components::voxels::*;
 
 use crate::components::positions::screen_position::ScreenPosition;
-use crate::plugins::inputs::cursor::CursorPlugin;
 use crate::plugins::inputs::InputsPluginGroup;
 use crate::resources::voxels::default_mesh::VoxelMesh;
 use crate::resources::window::size::ScreenSize;
 use crate::resources::world::config::WorldConfig;
 use crate::resources::world::map::GameMap;
+use crate::resources::world::player_world_viewpoint::PlayerWorldViewpoint;
 use crate::systems::inputs::{game_cursor, keyboard};
 use crate::systems::{camera, startup};
 
@@ -25,7 +23,7 @@ const SAND: Color = Color::rgb(0.761, 0.698, 0.);
 const EARTH: Color = Color::rgb(0.545, 0.271, 0.075);
 
 fn main() {
-    let voxels_width = 128 + 30;
+    let voxels_width = 133;
     let voxels_height = 72;
     let world_config = WorldConfig::new(voxels_width, voxels_height, 10);
     App::new()
@@ -39,6 +37,7 @@ fn main() {
         .add_plugins(InputsPluginGroup)
         .insert_resource(world_config)
         .insert_resource(GameMap::new(voxels_width, voxels_height))
+        .init_resource::<PlayerWorldViewpoint>()
         .init_resource::<VoxelManager>()
         .init_resource::<VoxelMesh>()
         .init_resource::<ScreenSize>()
